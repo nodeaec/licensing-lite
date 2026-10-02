@@ -1,0 +1,71 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+# Lite não referencia RevitAPI: a matriz RevitYear documenta qual TFM cada
+# ano do Revit carrega (2023 -> net48, 2026 -> net8.0-windows,
+# 2027 -> net10.0-windows). O build valida o TFM correspondente.
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - revit-year: "2023"
+            tfm: net48
+          - revit-year: "2026"
+            tfm: net8.0-windows
+          - revit-year: "2027"
+            tfm: net10.0-windows
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Build (Revit ${{ matrix.revit-year }} -> ${{ matrix.tfm }})
+        run: >
+          dotnet build src/NodeAec.Licensing.Lite/NodeAec.Licensing.Lite.csproj
+          -c Release -f ${{ matrix.tfm }} --nologo
+
+  pack:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      # Strong-name (release): decodifica o segredo para temp do runner.
+      # Sem o segredo (PRs/forks), o pack sai não-assinado — build não quebra.
+      - name: Restore .snk from secret (if present)
+        if: ${{ secrets.NODEAEC_SNK_BASE64 != '' }}
+        run: |
+          echo "${{ secrets.NODEAEC_SNK_BASE64 }}" | base64 -d > "$RUNNER_TEMP/NodeAec.snk"
+          echo "NODEAEC_SNK_PATH=$RUNNER_TEMP/NodeAec.snk" >> "$GITHUB_ENV"
+
+      - name: Pack
+        run: >
+          dotnet pack src/NodeAec.Licensing.Lite/NodeAec.Licensing.Lite.csproj
+          -c Release --nologo
+
+      - name: Checksum (.sha256, espelha scripts/release.ps1)
+        run: |
+          cd src/NodeAec.Licensing.Lite/bin/Release
+          for f in *.nupkg; do
+            sha256sum "$f" | awk '{print $1"  "$2}' > "$f.sha256"
+          done
+          cat *.sha256
+
+      # Authenticode via Azure Trusted Signing: passo humano/assistido na
+      # release (ver docs/signing.md §2). Entrar entre pack e checksum final.
+      - name: Upload artifact (.nupkg + .sha256)
+        uses: actions/upload-artifact@v4
+        with:
+          name: nupkg
+          path: src/NodeAec.Licensing.Lite/bin/Release/*.nupkg*

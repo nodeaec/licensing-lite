@@ -1,0 +1,106 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net48;net8.0-windows;net10.0-windows</TargetFrameworks>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>NodeAec.Licensing.Lite</AssemblyName>
+    <RootNamespace>NodeAec.Licensing.Lite</RootNamespace>
+    <Version>1.0.0-preview.1</Version>
+    <Description>Offline Ed25519 verification with no network for Node.aec Revit plugins (fail-closed, no HTTP).</Description>
+    <!-- NuGet.org metadata (PackageId/Version/Authors/Description/License/Repo/Tags). -->
+    <PackageId>NodeAec.Licensing.Lite</PackageId>
+    <Authors>Node.aec</Authors>
+    <Company>Node.aec</Company>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/nodeaec/licensing-lite</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>Revit NodeAec licensing offline</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <!-- HUMAN NOTE: reserve the NodeAec.* prefix on nuget.org (Node.aec account >
+         Account > "Reserve prefix") before the first push. Without the reservation,
+         any account can publish NodeAec.* packages (typosquatting). -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <!--
+      .NET Framework reference assemblies are nullable-oblivious: guards such as
+      string.IsNullOrEmpty(...) carry no [NotNullWhen] annotation, so proven-safe
+      dereferences still report CS8602/CS8603/CS8604 — only on net48. Same source
+      compiles warning-free on net8/net10. Suppressed for net48 only.
+    -->
+    <NoWarn Condition="'$(TargetFramework)' == 'net48'">$(NoWarn);CS8602;CS8603;CS8604</NoWarn>
+  </PropertyGroup>
+
+  <!-- Strong-name opt-in: full signing ONLY when a key path is supplied via
+       -p:NodeAecSnkPath=<full .snk> or env NODEAEC_SNK_PATH (CI decodes secret
+       NODEAEC_SNK_BASE64 to a temp file). Local builds stay unsigned and green.
+       NOTE: this block must stay BEFORE the InternalsVisibleTo items below —
+       MSBuild evaluates top-down, and the friend declaration depends on it. -->
+  <PropertyGroup>
+    <NodeAecSnkPath Condition="'$(NodeAecSnkPath)' == ''">$(NODEAEC_SNK_PATH)</NodeAecSnkPath>
+  </PropertyGroup>
+  <Choose>
+    <When Condition="'$(NodeAecSnkPath)' != ''">
+      <PropertyGroup>
+        <SignAssembly>true</SignAssembly>
+        <!-- AssemblyOriginatorKeyFile (input), NOT KeyOriginatorFile: the
+             ResolveKeySource target resolves this into KeyOriginatorFile and
+             WIPES a directly-set KeyOriginatorFile back to empty. -->
+        <AssemblyOriginatorKeyFile>$(NodeAecSnkPath)</AssemblyOriginatorKeyFile>
+        <DelaySign>false</DelaySign>
+      </PropertyGroup>
+    </When>
+    <Otherwise>
+      <PropertyGroup>
+        <SignAssembly>false</SignAssembly>
+      </PropertyGroup>
+    </Otherwise>
+  </Choose>
+
+  <!-- Test friends: internal hooks (MachineGuidReader, test anchors and lease).
+       CS1726: a signed assembly requires PublicKey on the friend. Without a key (local build /
+       test CI) the friend is keyless; on signed release the friend is only emitted
+       with the test public key (see docs/signing.md §1). -->
+  <ItemGroup Condition="'$(SignAssembly)' != 'true'">
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>NodeAec.Licensing.Lite.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+  <ItemGroup Condition="'$(SignAssembly)' == 'true' And '$(NodeAecTestsPublicKey)' != ''">
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>NodeAec.Licensing.Lite.Tests, PublicKey=$(NodeAecTestsPublicKey)</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Ed25519 (RFC 8032): signature verification of the leases. Managed, no native deps. -->
+    <PackageReference Include="BouncyCastle.Cryptography" Version="2.7.0" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
+    <!-- System.Text.Json is inbox on net8/net10; net48 needs the explicit package. -->
+    <PackageReference Include="System.Text.Json" Version="8.0.5" />
+    <!-- DPAPI: only the NuGet package provides it on net48 (Revit 2023/2024). -->
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="4.7.0" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net8.0-windows'">
+    <!-- Inbox via Microsoft.WindowsDesktop.App inside Revit 2025+; package only for compile. -->
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows'">
+    <!-- Same as net8: inbox at runtime in the Revit 2027 host; package only for compile. -->
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Lets net48 build on Linux CI (ubuntu + EnableWindowsTargeting): reference
+         assemblies only, PrivateAssets=all so nothing ships in the nupkg. No-op on Windows. -->
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+    <!-- Repo README ships at the package root (see PackageReadmeFile above). -->
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+</Project>
