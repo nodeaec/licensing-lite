@@ -66,7 +66,7 @@ public static class LeaseStorage
     /// <summary>
     /// Reads and decrypts the local master-lease JWT token.
     /// On Windows, a file that does not decrypt is treated as corrupt/foreign and
-    /// discarded (returns <c>null</c>) instead of being accepted as plaintext.
+    /// discarded (returns <c>null</c>); its content is never read as plaintext.
     /// </summary>
     public static string? LoadMasterLease()
     {

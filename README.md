@@ -38,7 +38,7 @@ if (!gate.IsLicensed)
 
 `Gate.Validate` never throws. `Gate.OpenConnector` forwards to the Connector Hub window via reflection when the Hub is loaded in the same `AppDomain`, and is a silent no-op otherwise.
 
-Migration between preview versions is using-only: the namespace remains `NodeAec.Licensing`.
+The public API lives in the `NodeAec.Licensing` namespace — stable across preview versions — so consuming the package needs only a `using` directive.
 
 ## Snapshot (6 members)
 
@@ -56,7 +56,7 @@ Migration between preview versions is using-only: the namespace remains `NodeAec
 ## How it works
 
 1. Reads `%APPDATA%\NodeAec\entitlements.lease`, protected with DPAPI `CurrentUser` (`DataProtectionScope.CurrentUser`). Content that does not decrypt is discarded, never treated as plaintext.
-2. Verifies the JWT Ed25519/EdDSA signature (RFC 8032, `alg: EdDSA`) against the compiled `TrustedAnchors` (SPKI public keys). The anchor list supports rotation as N/N+1: during a rotation it holds the new and the previous key; afterwards the retired key is removed. No private key exists in this repository.
+2. Verifies the JWT Ed25519/EdDSA signature (RFC 8032, `alg: EdDSA`) against the compiled `TrustedAnchors` (SPKI public keys). The anchor list supports rotation as N/N+1: during a rotation it holds the replacement key and the key being phased out at the same time, so installed plugins keep verifying; once the transition completes, the list holds the replacement key only. No private key exists in this repository.
 3. Evaluates claims only after the signature verifies, in fixed order: `iss` → `scope` → `aud` → `iat` (5-minute future tolerance) → machine binding (`mid`, SHA-256 of the Windows `MachineGuid`) → `exp` (offline grace deadline; missing or implausible `exp` is treated as expired) → product `slug` present and active (`status`, `granted`, per-grant expiry).
 
 ## Target frameworks

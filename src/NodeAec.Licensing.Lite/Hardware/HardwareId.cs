@@ -64,7 +64,7 @@ public static class HardwareId
         using var sha = SHA256.Create();
         var bytes = sha.ComputeHash(Encoding.UTF8.GetBytes(machineGuid.Trim()));
 
-        // BitConverter instead of Convert.ToHexString (only available on .NET 5+).
+        // BitConverter produces the hex text on every target framework (Convert.ToHexString needs .NET 5+).
         return BitConverter.ToString(bytes).Replace("-", string.Empty).ToLowerInvariant();
     }
 

@@ -41,9 +41,9 @@ public class MasterLeasePayload
 
     /// <summary>
     /// Expiry instant (<c>exp</c>). Unix seconds outside the plausible range
-    /// (0 = missing, negative, or ≥ 01/01/2100) yield <c>null</c> instead of
-    /// throwing <see cref="ArgumentOutOfRangeException"/> — <c>FromUnixTimeSeconds</c>
-    /// is only called after the range check.
+    /// (0 = missing, negative, or ≥ 01/01/2100) yield <c>null</c>: the range check
+    /// runs before <c>FromUnixTimeSeconds</c>, so the conversion never throws
+    /// <see cref="ArgumentOutOfRangeException"/>.
     /// </summary>
     [JsonIgnore]
     public DateTimeOffset? ExpiresAt => IsPlausibleUnixSeconds(Exp)

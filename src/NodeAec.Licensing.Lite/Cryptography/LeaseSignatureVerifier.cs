@@ -10,8 +10,9 @@ namespace NodeAec.Licensing.Cryptography;
 /// <summary>
 /// Verifies the Ed25519 (RFC 8032) signature of lease tokens issued by the Node.aec platform
 /// before any claim is trusted. Anchor-only mode: the only candidate keys are the
-/// anchors compiled into <see cref="TrustedAnchors"/>. There is no environment-variable
-/// override (an intentional difference from the Connector, which is the operations Hub).
+/// anchors compiled into <see cref="TrustedAnchors"/>. The compiled list is the only
+/// source of trust: there is no environment-variable override. Key management belongs
+/// to the Node.aec Connector, the operations Hub.
 /// Always fails closed: with no usable anchor or an invalid signature, the lease
 /// is not accepted.
 /// </summary>
@@ -22,8 +23,9 @@ public static class LeaseSignatureVerifier
 
     /// <summary>
     /// Public verification anchors (base64 SPKI Ed25519). The list supports N/N+1
-    /// rotation: during a rotation it holds the new and the old key; afterwards the
-    /// old one is removed.
+    /// rotation: during a rotation it holds the replacement key and the key being
+    /// phased out at the same time, and the replacement key alone once the transition
+    /// completes.
     /// No private key exists in this repository.
     /// </summary>
     public static readonly string[] TrustedAnchors =
@@ -225,8 +227,8 @@ public static class LeaseSignatureVerifier
             }
         }
 
-        // Explicit copy instead of a range slice (`der[i..]`), which requires System.Index/
-        // System.Range — types missing on .NET Framework 4.8 (Revit 2023/2024).
+        // Explicit copy: a range slice (`der[i..]`) requires System.Index/System.Range,
+        // types that .NET Framework 4.8 (Revit 2023/2024) does not provide.
         rawKey = new byte[RawKeySize];
         Array.Copy(der, SpkiEd25519Prefix.Length, rawKey, 0, RawKeySize);
         reason = null;
