@@ -22,6 +22,8 @@ dotnet build -p:NodeAecSnkPath=C:\tmp\NodeAec.snk
 $env:NODEAEC_SNK_PATH = "C:\tmp\NodeAec.snk"; dotnet build
 ```
 
+Current release key: `PublicKeyToken=b00754dbadfd618b` (first used in 0.2.0; 0.1.0 was unsigned).
+
 ### Generate the REAL key (human step, once, on Windows)
 
 ```powershell
