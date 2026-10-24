@@ -1,4 +1,4 @@
-# Signing: strong-name (.snk) + Authenticode (Trusted Signing)
+# Signing: strong-name (.snk)
 
 > Golden rule: **no private key enters git.** If one leaks, rotate the
 > key and follow `docs/rotation.md`.
@@ -73,49 +73,24 @@ $dll = "src\NodeAec.Licensing.Lite\bin\Release\net8.0-windows\NodeAec.Licensing.
 ).Replace("-","").ToLowerInvariant()
 ```
 
-## 2. Authenticode (Trusted Signing) — proves *authorship* on Windows
+## 2. Authenticode — not used
 
-What it is: Windows/SmartScreen checks *who* signed the DLL and the `.nupkg`
-(strong naming proves .NET identity; Authenticode proves publisher plus
-guarantees the file has not been altered). Requires an **Azure Trusted Signing**
-account.
+The package does not carry an Authenticode signature, by decision. What it has instead:
 
-Release flow (on Windows, after `scripts/release.ps1` produces the `.nupkg`):
+- The strong name (§1) gives the .NET identity, and `release.ps1` refuses to pack an unsigned build.
+- nuget.org adds its repository signature (`.signature.p7s`) to every `.nupkg` on upload.
+- `release/*.sha256` is the checksum of the exact package that was pushed.
 
-```powershell
-# 1. Install the Trusted Signing SDK (once):
-dotnet tool install --global Azure.CodeSigning.DotNetTool  # or via AKV + signtool
+Revit only checks Authenticode on the add-in's main assembly (the one named in the
+`.addin`), never on dependencies such as this package, so signing it would not change
+what the user sees. Partner plugins sign, or don't sign, their own main assembly.
 
-# 2. Sign the DLLs (one per TFM) + package, with timestamp:
-$files = @(
-  "src\NodeAec.Licensing.Lite\bin\Release\net48\NodeAec.Licensing.Lite.dll",
-  "src\NodeAec.Licensing.Lite\bin\Release\net8.0-windows\NodeAec.Licensing.Lite.dll",
-  "src\NodeAec.Licensing.Lite\bin\Release\net10.0-windows\NodeAec.Licensing.Lite.dll",
-  "release\NodeAec.Licensing.Lite.1.0.0-preview.1.nupkg"
-)
-# Via Trusted Signing (account/config from TRUSTED_SIGNING_* secrets):
-#   AzureTrustedSigning.exe sign -f $files `
-#     -a <account> -p <profile> -e <endpoint> -t <tenant>
-# Classic alternative (EV cert on HSM) — always with an RFC 3161 timestamp:
-#   signtool.exe sign /tr http://timestamp.digicert.com /td sha256 /fd sha256 `
-#     /a <each file>
-
-# 3. Verify:
-signtool.exe verify /pa <each file>
-
-# 4. Regenerate the checksum AFTER signing (signing changes the bytes!):
-Get-FileHash release\*.nupkg -Algorithm SHA256
-```
-
-Required order: **build → strong-name → Authenticode → sha256**.
-`scripts/release.ps1` performs build+pack+sha256. It refuses to run without
-`-Version` and a strong-name key (`-SnkPath` or `NODEAEC_SNK_PATH`), and fails if
-any packed DLL lacks a `PublicKeyToken`. Why: an unsigned build emits a keyless
+`scripts/release.ps1` refuses to run without `-Version` and a strong-name key
+(`-SnkPath` or `NODEAEC_SNK_PATH`), and fails if any packed DLL lacks a
+`PublicKeyToken`. Why: an unsigned build emits a keyless
 `InternalsVisibleTo("NodeAec.Licensing.Lite.Tests")`, so any assembly with that name
 could call the test-only anchor hook. Version 0.1.0 on NuGet.org was published
-unsigned and has this friend declaration; publish a signed successor. Authenticode signing
-goes between pack and the final hash (the script regenerates the `.sha256`
-on its own with every run — run it again after signing).
+unsigned and has this friend declaration; 0.2.0 is its signed successor.
 
 ## 3. NuGet.org — prefix reservation (human step)
 
@@ -134,5 +109,4 @@ Before the first `dotnet nuget push`:
 |---|---|---|
 | `NODEAEC_SNK_BASE64` | full `.snk` as base64 | GitHub Secrets |
 | `NUGET_API_KEY` | push scoped to the package | GitHub Secrets |
-| `TRUSTED_SIGNING_*` | account/profile/endpoint/tenant | GitHub Secrets |
 | Ed25519 lease private key | signs leases on the server | **server/HSM, never here** |

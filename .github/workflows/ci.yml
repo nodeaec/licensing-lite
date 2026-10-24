@@ -62,8 +62,6 @@ jobs:
           done
           cat *.sha256
 
-      # Authenticode via Azure Trusted Signing: passo humano/assistido na
-      # release (ver docs/signing.md §2). Entrar entre pack e checksum final.
       - name: Upload artifact (.nupkg + .sha256)
         uses: actions/upload-artifact@v4
         with:

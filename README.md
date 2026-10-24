@@ -77,7 +77,7 @@ Ed25519 verification is managed code (BouncyCastle, no native dependencies). `Sy
 
 ## Signing and rotation
 
-- Strong-name (`.snk`) and Authenticode (Azure Trusted Signing) procedure: `docs/signing.md`.
+- Strong-name (`.snk`) procedure, and why there is no Authenticode: `docs/signing.md`.
 - Ed25519 anchor rotation (N/N+1) and strong-name key change: `docs/rotation.md`.
 
-Release order is `build → strong-name → Authenticode → sha256`; `scripts/release.ps1` regenerates the `.sha256` sidecar last because signing changes the bytes. The script requires `-Version` and a strong-name key (`-SnkPath` or `NODEAEC_SNK_PATH`), and fails if any packed DLL is not strong-named: an unsigned build carries a keyless `InternalsVisibleTo` for the test assembly and must never be published.
+`scripts/release.ps1` builds with the strong-name key, packs, and writes the `.sha256` sidecar last. It requires `-Version` and a strong-name key (`-SnkPath` or `NODEAEC_SNK_PATH`), and fails if any packed DLL is not strong-named: an unsigned build carries a keyless `InternalsVisibleTo` for the test assembly and must never be published.

@@ -5,9 +5,8 @@
 .DESCRIPTION
   Mirrors revit-connector/scripts/release.ps1 conventions: artifacts land in
   release/ with a "<hash>  <filename>" .sha256 sidecar (same format as
-  Get-FileHash output). Re-run AFTER Authenticode signing — signing changes
-  the bytes, so the checksum must always be generated last
-  (see docs/signing.md §2: build -> strong-name -> Authenticode -> sha256).
+  Get-FileHash output). Order: build (strong-named) -> pack -> sha256
+  (see docs/signing.md).
 
 .EXAMPLE
   $env:NODEAEC_SNK_PATH = "C:\secure\NodeAec.snk"
@@ -70,7 +69,7 @@ New-Item $ReleaseDir -ItemType Directory -Force | Out-Null
 Copy-Item $nupkg.FullName (Join-Path $ReleaseDir $nupkg.Name) -Force
 $staged = Join-Path $ReleaseDir $nupkg.Name
 
-# Checksum LAST (after any Authenticode signing — re-run this script then).
+# Checksum last, of the exact package that gets pushed.
 $hash = (Get-FileHash $staged -Algorithm SHA256).Hash.ToLowerInvariant()
 "$hash  $($nupkg.Name)" | Out-File "$staged.sha256" -Encoding ascii
 Write-Host "==> release: $staged"
