@@ -15,7 +15,7 @@ dotnet add package NodeAec.Licensing.Lite
 or declare the dependency directly:
 
 ```xml
-<PackageReference Include="NodeAec.Licensing.Lite" Version="1.0.0-preview.1" />
+<PackageReference Include="NodeAec.Licensing.Lite" Version="0.2.0" />
 ```
 
 ## Usage (3 lines)
@@ -80,4 +80,4 @@ Ed25519 verification is managed code (BouncyCastle, no native dependencies). `Sy
 - Strong-name (`.snk`) and Authenticode (Azure Trusted Signing) procedure: `docs/signing.md`.
 - Ed25519 anchor rotation (N/N+1) and strong-name key change: `docs/rotation.md`.
 
-Release order is `build → strong-name → Authenticode → sha256`; `scripts/release.ps1` regenerates the `.sha256` sidecar last because signing changes the bytes.
+Release order is `build → strong-name → Authenticode → sha256`; `scripts/release.ps1` regenerates the `.sha256` sidecar last because signing changes the bytes. The script requires `-Version` and a strong-name key (`-SnkPath` or `NODEAEC_SNK_PATH`), and fails if any packed DLL is not strong-named: an unsigned build carries a keyless `InternalsVisibleTo` for the test assembly and must never be published.

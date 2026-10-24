@@ -106,7 +106,12 @@ Get-FileHash release\*.nupkg -Algorithm SHA256
 ```
 
 Required order: **build → strong-name → Authenticode → sha256**.
-`scripts/release.ps1` performs build+pack+sha256; Authenticode signing
+`scripts/release.ps1` performs build+pack+sha256. It refuses to run without
+`-Version` and a strong-name key (`-SnkPath` or `NODEAEC_SNK_PATH`), and fails if
+any packed DLL lacks a `PublicKeyToken`. Why: an unsigned build emits a keyless
+`InternalsVisibleTo("NodeAec.Licensing.Lite.Tests")`, so any assembly with that name
+could call the test-only anchor hook. Version 0.1.0 on NuGet.org was published
+unsigned and has this friend declaration; publish a signed successor. Authenticode signing
 goes between pack and the final hash (the script regenerates the `.sha256`
 on its own with every run — run it again after signing).
 

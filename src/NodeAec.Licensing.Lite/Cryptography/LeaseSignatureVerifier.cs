@@ -27,8 +27,14 @@ public static class LeaseSignatureVerifier
     /// phased out at the same time, and the replacement key alone once the transition
     /// completes.
     /// No private key exists in this repository.
+    /// <para>
+    /// Private on purpose: a <c>public static readonly string[]</c> only freezes the
+    /// reference, not the elements, so any add-in in the Revit process could replace an
+    /// anchor with one assignment and make every plugin sharing this assembly accept its
+    /// leases. Rotation changes this list in source and ships a new package version.
+    /// </para>
     /// </summary>
-    public static readonly string[] TrustedAnchors =
+    private static readonly string[] TrustedAnchors =
     {
         "MCowBQYDK2VwAyEArMYcaZMAlBeimfR6twrHZndEWOSaIHlSURYFhTjalMg=",
     };
