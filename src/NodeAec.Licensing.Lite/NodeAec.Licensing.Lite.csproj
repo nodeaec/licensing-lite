@@ -33,8 +33,8 @@
   </PropertyGroup>
 
   <!-- Strong-name opt-in: full signing ONLY when a key path is supplied via
-       -p:NodeAecSnkPath=<full .snk> or env NODEAEC_SNK_PATH (CI decodes secret
-       NODEAEC_SNK_BASE64 to a temp file). Local builds stay unsigned and green.
+       -p:NodeAecSnkPath=<full .snk> or env NODEAEC_SNK_PATH (scripts/release.ps1
+       requires one). Local and CI builds stay unsigned and green.
        NOTE: this block must stay BEFORE the InternalsVisibleTo items below —
        MSBuild evaluates top-down, and the friend declaration depends on it. -->
   <PropertyGroup>

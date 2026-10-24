@@ -31,7 +31,7 @@ Emergency (private key leaked / suspected): run 1–3 immediately
 Changing the `.snk` changes the `PublicKeyToken` = **breaking change**: every plugin
 must rebuild against the new package. Procedure:
 
-1. Generate a new `.snk` (`sn.exe -k`), update `NODEAEC_SNK_BASE64`.
+1. Generate a new `.snk` (`sn.exe -k`), store it outside the repo with a vault backup.
 2. Publish a new Lite major/preview signed with the new key.
 3. Plugins update the `PackageReference` and republish.
 4. Revoke/delete the old key from the vault.
