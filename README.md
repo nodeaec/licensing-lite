@@ -2,7 +2,7 @@
 
 Offline license gate for Node.aec Revit add-ins. This NuGet package evaluates a locally stored, signed entitlements lease and returns an immutable verdict. It performs no HTTP requests, hosts no UI, and starts no background threads or timers. Lease synchronization is owned exclusively by the Node.aec Connector (Hub); this library is read-and-verify only.
 
-All failure modes are fail-closed: a missing lease, an invalid signature, a machine mismatch, or an expired offline grace period yields `IsLicensed = false` with a PT-BR `Message` intended to be displayed verbatim.
+All failure modes are fail-closed: a missing lease, an invalid signature, a machine mismatch, or an expired offline grace period yields `IsLicensed = false`, a `Reason` naming the case, and a message (Portuguese or English) intended to be displayed verbatim.
 
 ## Installation
 
@@ -15,7 +15,7 @@ dotnet add package NodeAec.Licensing.Lite
 or declare the dependency directly:
 
 ```xml
-<PackageReference Include="NodeAec.Licensing.Lite" Version="0.2.0" />
+<PackageReference Include="NodeAec.Licensing.Lite" Version="0.3.0" />
 ```
 
 ## Usage (3 lines)
@@ -30,8 +30,9 @@ const string ProductSlug = "my-plugin";
 var gate = Gate.Validate(ProductSlug);
 if (!gate.IsLicensed)
 {
-    TaskDialog.Show("License Required", gate.Message); // verbatim, already user guidance
-    Gate.OpenConnector();                              // silent no-op if Hub is absent
+    // Verbatim, already user guidance. gate.Message is the Portuguese text.
+    TaskDialog.Show("License Required", gate.GetMessage(MessageLanguage.English));
+    Gate.OpenConnector(); // silent no-op if Hub is absent
     return Result.Cancelled;
 }
 ```
@@ -40,18 +41,47 @@ if (!gate.IsLicensed)
 
 The public API lives in the `NodeAec.Licensing` namespace — stable across preview versions — so consuming the package needs only a `using` directive.
 
-## Snapshot (6 members)
+## Snapshot
 
 `Gate.Validate` returns an immutable `Snapshot`. `IsLicensed` is the only branch point.
 
 | Member | Type | Meaning |
 |---|---|---|
 | `IsLicensed` | `bool` | `true` only for an active, verified grant. |
-| `Message` | `string` | PT-BR guidance text. Display verbatim on denial. |
+| `Reason` | `GateReason` | Why: `Licensed`, or the one failure case (table below). For logs and UI tweaks, never to decide whether to run. Since 0.3.0. |
+| `GetMessage(MessageLanguage)` | `string` | End-user text in `Portuguese` or `English`. Display verbatim on denial. Since 0.3.0. |
+| `Message` | `string` | Same as `GetMessage(MessageLanguage.Portuguese)`. |
 | `ProductName` | `string?` | Display name of the grant; `null` on denial. |
 | `LicenseType` | `string?` | Grant type (for example `perpetual`); `null` on denial. |
-| `LicenseKey` | `string?` | License key; `null` on denial. |
+| `LicenseKey` | `string?` | The end user's license key; `null` on denial. Never log it or send it anywhere. |
 | `ExpiresAt` | `DateTimeOffset?` | Grant expiry; `null` means no expiry claim (perpetual). |
+
+## Reasons and messages
+
+Each `GateReason` value has a fixed number that never changes or gets reused. New values may
+be added later, so a `switch` over `GateReason` needs a `default` branch. Dates are
+`dd/MM/yyyy` in Portuguese and `MMM d, yyyy` in English, the same on every Windows locale.
+
+| # | `GateReason` | English | Portuguese |
+|---|---|---|---|
+| 0 | `Licensed` | License active and verified. | Licença ativa e verificada. |
+| 1 | `MissingProductSlug` | No product slug was given for validation. | Slug do produto não informado para validação. |
+| 2 | `NoLease` | No Node.aec credentials were found on this computer. Open the Node.aec Connector on the Ribbon to sign in or activate your license. | Nenhuma credencial do Node.aec encontrada nesta estação. Abra o Node.aec Connector na Ribbon para entrar com sua conta ou ativar sua licença. |
+| 3 | `CorruptLease` | The local license is corrupted or invalid. Open the Node.aec Connector to synchronize again. | Concessão corrompida ou estrutura inválida. Abra o Node.aec Connector para ressincronizar. |
+| 4 | `SignatureInvalid` | The local license failed the security check. Connect to the internet and click refresh in the Node.aec Connector. | A licença local não passou na verificação de segurança. Conecte-se à internet e clique em atualizar no Node.aec Connector. |
+| 5 | `UnknownIssuer` | The local license comes from an unknown issuer. Connect to the internet and click refresh in the Node.aec Connector. | Origem da licença local desconhecida. Conecte-se à internet e clique em atualizar no Node.aec Connector. |
+| 6 | `UnsupportedFormat` | The local license is in an unsupported format. Connect to the internet and click refresh in the Node.aec Connector. | A licença local está em formato não suportado. Conecte-se à internet e clique em atualizar no Node.aec Connector. |
+| 7 | `WrongAudience` | The local license was not issued for this add-in. Connect to the internet and click refresh in the Node.aec Connector. | A licença local não foi emitida para este add-in. Conecte-se à internet e clique em atualizar no Node.aec Connector. |
+| 8 | `ClockInvalid` | The local license date is invalid. Check this computer's date and time and try again. | A data da licença local é inválida. Confira a data e hora deste computador e tente novamente. |
+| 9 | `MachineIdUnavailable` | This computer could not be identified (Windows MachineGuid unavailable). Contact Node.aec support. | Não foi possível identificar esta máquina (MachineGuid do Windows indisponível). Contate o suporte Node.aec. |
+| 10 | `MachineMismatch` | The licenses were issued for another computer (Hardware ID mismatch). | A concessão de licenças foi emitida para outra estação de trabalho (Hardware ID divergente). |
+| 11 | `OfflineGraceExpired` | The offline grace period expired on {date}. Connect to the internet to synchronize. | O prazo de tolerância offline expirou em {date}. Conecte-se à internet para sincronizar. |
+| 12 | `LeaseExpiryUnreadable` | The local license deadline could not be read. Connect to the internet and click refresh in the Node.aec Connector. | O prazo da licença local não pôde ser lido. Conecte-se à internet e clique em atualizar no Node.aec Connector. |
+| 13 | `ProductNotFound` | The product '{slug}' is not among this account's active licenses. Buy or activate it in the Node.aec catalog. | O produto '{slug}' não consta nas licenças ativas desta conta. Adquira ou ative no catálogo Node.aec. |
+| 14 | `SeatLimitReached` | All computers allowed for '{name}' are already in use. | O limite de computadores simultâneos para '{name}' foi atingido. |
+| 15 | `LicenseExpired` | The license or trial of '{name}' expired on {date}. | A licença ou período de teste de '{name}' expirou em {date}. |
+| 16 | `LicenseInactive` | The license of '{name}' has status '{status}'. | A licença de '{name}' está com status '{status}'. |
+| 17 | `VerificationError` | The local license could not be verified. Open the Node.aec Connector to synchronize again. | Não foi possível verificar a licença local. Abra o Node.aec Connector para ressincronizar. |
 
 ## How it works
 
@@ -71,9 +101,22 @@ Ed25519 verification is managed code (BouncyCastle, no native dependencies). `Sy
 
 ## Design constraints
 
-- No HTTP, no login UI, no background work. The only UI in the usage pattern is the caller-owned `TaskDialog` showing `Snapshot.Message`.
+- No HTTP, no login UI, no background work. The only UI in the usage pattern is the caller-owned `TaskDialog` showing the snapshot's message.
 - Fail-closed at every layer: `Gate.Validate` catches all exceptions and returns a denied `Snapshot`; an unusable anchor set denies rather than skips verification.
 - Write path belongs to the Connector Hub. This package never writes, renews, or deletes the lease file in production.
+
+## Compatibility between versions
+
+The Node.aec Connector references this package too, and so does every partner plugin, so
+several copies can meet in one Revit process. On Revit 2025+ (.NET 8/10) only one version
+loads: the first one. Two rules keep that safe:
+
+- **Additive only.** A release never removes or changes a public member, so a plugin built
+  against an older version works with any newer one.
+- **The Connector ships the newest version.** It loads the package at startup, so plugins built
+  against the same or an older version always find what they need.
+
+Details: [revit-connector `docs/lite-adoption.md`](https://github.com/nodeaec/revit-connector/blob/main/docs/lite-adoption.md).
 
 ## Signing and rotation
 

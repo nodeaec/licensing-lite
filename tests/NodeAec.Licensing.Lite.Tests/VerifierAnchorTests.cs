@@ -73,4 +73,33 @@ public class VerifierAnchorTests : IDisposable
             LeaseSignatureVerifier.UseTestAnchorForTests(TestHelpers.TestAnchorSpkiBase64);
         }
     }
+
+    [Fact]
+    public void IsTrustedKey_MatchesOnlyTheAnchors()
+    {
+        Assert.True(LeaseSignatureVerifier.TryDecodeSpkiBase64(TestHelpers.TestAnchorSpkiBase64, out byte[] testKey, out _));
+        Assert.True(LeaseSignatureVerifier.IsTrustedKey(testKey));
+
+        byte[] other = (byte[])testKey.Clone();
+        other[0] ^= 0xFF;
+        Assert.False(LeaseSignatureVerifier.IsTrustedKey(other));
+        Assert.False(LeaseSignatureVerifier.IsTrustedKey(null));
+        Assert.False(LeaseSignatureVerifier.IsTrustedKey(new byte[5]));
+    }
+
+    [Fact]
+    public void IsTrustedKey_AcceptsTheCompiledReleaseAnchor()
+    {
+        LeaseSignatureVerifier.ClearTestAnchorOverride();
+        try
+        {
+            Assert.True(LeaseSignatureVerifier.TryDecodeSpkiBase64(
+                "MCowBQYDK2VwAyEArMYcaZMAlBeimfR6twrHZndEWOSaIHlSURYFhTjalMg=", out byte[] release, out _));
+            Assert.True(LeaseSignatureVerifier.IsTrustedKey(release));
+        }
+        finally
+        {
+            LeaseSignatureVerifier.UseTestAnchorForTests(TestHelpers.TestAnchorSpkiBase64);
+        }
+    }
 }

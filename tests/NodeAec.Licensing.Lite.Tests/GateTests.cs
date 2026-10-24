@@ -86,6 +86,9 @@ public class GateTests : IDisposable
         Assert.Equal("perpetual", snapshot.LicenseType);
         Assert.Equal("NAEC-TEST-1", snapshot.LicenseKey);
         Assert.Null(snapshot.ExpiresAt); // sem claim expiresAt no item = perpétuo.
+        Assert.Equal(GateReason.Licensed, snapshot.Reason);
+        Assert.Equal("Licença ativa e verificada.", snapshot.Message);
+        Assert.Equal("License active and verified.", snapshot.GetMessage(MessageLanguage.English));
     }
 
     [Fact]
@@ -107,6 +110,7 @@ public class GateTests : IDisposable
 
         Assert.False(snapshot.IsLicensed);
         Assert.Contains("verificação de segurança", snapshot.Message);
+        Assert.Equal(GateReason.SignatureInvalid, snapshot.Reason);
     }
 
     [Fact]
@@ -118,7 +122,12 @@ public class GateTests : IDisposable
         string tamperedPayload = (first == 'A' ? 'B' : 'A') + parts[1].Substring(1);
         InstallLease($"{parts[0]}.{tamperedPayload}.{parts[2]}");
 
-        Assert.False(Gate.Validate(TestHelpers.TestSlug).IsLicensed);
+        var snapshot = Gate.Validate(TestHelpers.TestSlug);
+
+        Assert.False(snapshot.IsLicensed);
+        // Depending on the flipped byte the payload stops being JSON (read before the
+        // signature) or stays JSON and fails the signature check.
+        Assert.Contains(snapshot.Reason, new[] { GateReason.CorruptLease, GateReason.SignatureInvalid });
     }
 
     [Fact]
@@ -130,6 +139,7 @@ public class GateTests : IDisposable
 
         Assert.False(snapshot.IsLicensed);
         Assert.Contains("Origem", snapshot.Message);
+        Assert.Equal(GateReason.UnknownIssuer, snapshot.Reason);
     }
 
     [Fact]
@@ -141,6 +151,7 @@ public class GateTests : IDisposable
 
         Assert.False(snapshot.IsLicensed);
         Assert.Contains("formato não suportado", snapshot.Message);
+        Assert.Equal(GateReason.UnsupportedFormat, snapshot.Reason);
     }
 
     [Theory]
@@ -154,6 +165,7 @@ public class GateTests : IDisposable
 
         Assert.False(snapshot.IsLicensed);
         Assert.Contains("não foi emitida para este add-in", snapshot.Message);
+        Assert.Equal(GateReason.WrongAudience, snapshot.Reason);
     }
 
     [Fact]
@@ -161,7 +173,10 @@ public class GateTests : IDisposable
     {
         InstallLease(TestHelpers.CreateMasterLeaseJwt(omitAud: true));
 
-        Assert.False(Gate.Validate(TestHelpers.TestSlug).IsLicensed);
+        var snapshot = Gate.Validate(TestHelpers.TestSlug);
+
+        Assert.False(snapshot.IsLicensed);
+        Assert.Equal(GateReason.WrongAudience, snapshot.Reason);
     }
 
     [Fact]
@@ -174,6 +189,7 @@ public class GateTests : IDisposable
 
         Assert.False(snapshot.IsLicensed);
         Assert.Contains("data da licença", snapshot.Message);
+        Assert.Equal(GateReason.ClockInvalid, snapshot.Reason);
     }
 
     [Fact]
@@ -185,6 +201,7 @@ public class GateTests : IDisposable
 
         Assert.False(snapshot.IsLicensed);
         Assert.Contains("outra estação", snapshot.Message);
+        Assert.Equal(GateReason.MachineMismatch, snapshot.Reason);
     }
 
     [Fact]
@@ -196,6 +213,7 @@ public class GateTests : IDisposable
 
         Assert.False(snapshot.IsLicensed);
         Assert.Contains("expirou em", snapshot.Message);
+        Assert.Equal(GateReason.OfflineGraceExpired, snapshot.Reason);
     }
 
     [Fact]
@@ -208,6 +226,7 @@ public class GateTests : IDisposable
 
         Assert.False(snapshot.IsLicensed);
         Assert.Contains("não pôde ser lido", snapshot.Message);
+        Assert.Equal(GateReason.LeaseExpiryUnreadable, snapshot.Reason);
     }
 
     [Fact]
@@ -222,6 +241,7 @@ public class GateTests : IDisposable
 
         Assert.False(snapshot.IsLicensed);
         Assert.Contains("não consta", snapshot.Message);
+        Assert.Equal(GateReason.ProductNotFound, snapshot.Reason);
     }
 
     [Fact]
@@ -235,6 +255,7 @@ public class GateTests : IDisposable
         Assert.False(snapshot.IsLicensed);
         Assert.Null(snapshot.ProductName);
         Assert.Contains("licença de", snapshot.Message);
+        Assert.Equal(GateReason.LicenseInactive, snapshot.Reason);
     }
 
     [Theory]
@@ -250,6 +271,8 @@ public class GateTests : IDisposable
 
         Assert.False(snapshot.IsLicensed);
         Assert.Null(snapshot.ProductName);
+        Assert.Equal(GateReason.LicenseInactive, snapshot.Reason);
+        Assert.Contains($"'{status}'", snapshot.GetMessage(MessageLanguage.English));
     }
 
     [Fact]
@@ -262,6 +285,7 @@ public class GateTests : IDisposable
 
         Assert.False(snapshot.IsLicensed);
         Assert.Contains("limite de computadores", snapshot.Message);
+        Assert.Equal(GateReason.SeatLimitReached, snapshot.Reason);
     }
 
     [Theory]
@@ -276,6 +300,7 @@ public class GateTests : IDisposable
 
         Assert.False(snapshot.IsLicensed);
         Assert.Contains("Slug do produto", snapshot.Message);
+        Assert.Equal(GateReason.MissingProductSlug, snapshot.Reason);
     }
 
     [Fact]
@@ -285,6 +310,7 @@ public class GateTests : IDisposable
 
         Assert.False(snapshot.IsLicensed);
         Assert.Contains("Nenhuma credencial", snapshot.Message);
+        Assert.Equal(GateReason.NoLease, snapshot.Reason);
     }
 
     [Fact]
@@ -303,5 +329,82 @@ public class GateTests : IDisposable
         {
             LeaseStorage.ClearTestLeaseOverride();
         }
+    }
+
+    [Fact]
+    public void ExpiredLicense_NamesProductAndDateInBothLanguages()
+    {
+        var expired = new DateTimeOffset(2026, 3, 5, 12, 0, 0, TimeSpan.Zero);
+        InstallLease(TestHelpers.CreateMasterLeaseJwt(
+            entitlements: EntitlementsWith(e =>
+            {
+                e.Status = "expired";
+                e.ExpiresAtString = expired.ToString("o");
+            })));
+
+        var snapshot = Gate.Validate(TestHelpers.TestSlug);
+
+        Assert.Equal(GateReason.LicenseExpired, snapshot.Reason);
+        Assert.Equal("A licença ou período de teste de 'Revit Automator' expirou em 05/03/2026.", snapshot.Message);
+        Assert.Equal("The license or trial of 'Revit Automator' expired on Mar 5, 2026.", snapshot.GetMessage(MessageLanguage.English));
+    }
+
+    [Fact]
+    public void ProductNotFound_EnglishNamesTheRequestedSlug()
+    {
+        InstallLease(TestHelpers.CreateMasterLeaseJwt(entitlements: new List<EntitlementItem>
+        {
+            new() { Slug = "outro-produto", Name = "Outro", Status = "active" },
+        }));
+
+        var snapshot = Gate.Validate(TestHelpers.TestSlug);
+
+        Assert.Equal(
+            $"The product '{TestHelpers.TestSlug}' is not among this account's active licenses. Buy or activate it in the Node.aec catalog.",
+            snapshot.GetMessage(MessageLanguage.English));
+    }
+
+    [Fact]
+    public void EveryReason_HasAPortugueseAndAnEnglishMessage()
+    {
+        foreach (GateReason reason in Enum.GetValues(typeof(GateReason)))
+        {
+            string pt = GateMessages.Format(reason, MessageLanguage.Portuguese, "x", "y", DateTimeOffset.UtcNow);
+            string en = GateMessages.Format(reason, MessageLanguage.English, "x", "y", DateTimeOffset.UtcNow);
+
+            Assert.False(string.IsNullOrWhiteSpace(pt), reason.ToString());
+            Assert.False(string.IsNullOrWhiteSpace(en), reason.ToString());
+            Assert.NotEqual(pt, en);
+            if (reason != GateReason.VerificationError)
+            {
+                // Only the unexpected-error case may fall through to the default text.
+                Assert.NotEqual(GateMessages.Format(GateReason.VerificationError, MessageLanguage.English, "x", "y", null), en);
+            }
+        }
+    }
+
+    [Fact]
+    public void ReasonValues_AreStable()
+    {
+        // The numbers are contract: plugins may persist or log them.
+        Assert.Equal(0, (int)GateReason.Licensed);
+        Assert.Equal(2, (int)GateReason.NoLease);
+        Assert.Equal(11, (int)GateReason.OfflineGraceExpired);
+        Assert.Equal(13, (int)GateReason.ProductNotFound);
+        Assert.Equal(17, (int)GateReason.VerificationError);
+        Assert.Equal(18, Enum.GetValues(typeof(GateReason)).Length);
+    }
+
+    [Fact]
+    public void LegacyFactories_KeepTheirFixedText()
+    {
+        var failure = Snapshot.Failure("texto fixo");
+        Assert.False(failure.IsLicensed);
+        Assert.Equal(GateReason.VerificationError, failure.Reason);
+        Assert.Equal("texto fixo", failure.GetMessage(MessageLanguage.English));
+
+        var success = Snapshot.Success("perpetual", null, "P", null);
+        Assert.True(success.IsLicensed);
+        Assert.Equal("License active and verified.", success.GetMessage(MessageLanguage.English));
     }
 }

@@ -1,4 +1,5 @@
 using System;
+using System.ComponentModel;
 using System.Linq;
 using System.Reflection;
 using System.Text.Json;
@@ -26,17 +27,25 @@ public static class Gate
     /// verifies the lease Ed25519 signature and only then trusts the claims.
     /// Slug comparison uses <c>Trim()</c> + <c>OrdinalIgnoreCase</c>.
     /// </summary>
+    /// <remarks>
+    /// Never throws: every failure comes back as a denied <see cref="Snapshot"/> whose
+    /// <see cref="Snapshot.Reason"/> names the cause. Each call reads and verifies the lease
+    /// from disk (no cache), so call it once per command execution and never from
+    /// <c>IExternalCommandAvailability</c>. Safe to call from any thread.
+    /// </remarks>
+    /// <param name="productSlug">Product slug registered on Node.aec (case-insensitive).</param>
+    /// <returns>The immutable decision; read <see cref="Snapshot.IsLicensed"/> first.</returns>
     public static Snapshot Validate(string productSlug)
     {
         if (string.IsNullOrWhiteSpace(productSlug))
         {
-            return Snapshot.Failure("Slug do produto não informado para validação.");
+            return Snapshot.Denied(GateReason.MissingProductSlug);
         }
 
         string? jwtToken = LeaseStorage.LoadMasterLease();
         if (string.IsNullOrWhiteSpace(jwtToken))
         {
-            return Snapshot.Failure("Nenhuma credencial do Node.aec encontrada nesta estação. Abra o Node.aec Connector na Ribbon para entrar com sua conta ou ativar sua licença.");
+            return Snapshot.Denied(GateReason.NoLease);
         }
 
         try
@@ -44,7 +53,7 @@ public static class Gate
             var payload = LeaseStorage.ParseJwtPayload(jwtToken);
             if (payload == null)
             {
-                return Snapshot.Failure("Concessão corrompida ou estrutura inválida. Abra o Node.aec Connector para ressincronizar.");
+                return Snapshot.Denied(GateReason.CorruptLease);
             }
 
             // 0. Cryptographic verification (Ed25519 / RFC 8032): no claim is worth
@@ -52,44 +61,44 @@ public static class Gate
             // differently-keyed file is rejected here, fail-closed.
             if (!LeaseSignatureVerifier.TryVerify(jwtToken, out _))
             {
-                return Snapshot.Failure("A licença local não passou na verificação de segurança. Conecte-se à internet e clique em atualizar no Node.aec Connector.");
+                return Snapshot.Denied(GateReason.SignatureInvalid);
             }
 
             // 0.1 Token contract: only master leases issued by the Node.aec platform.
             if (!string.Equals(payload.Iss, "node-aec", StringComparison.Ordinal))
             {
-                return Snapshot.Failure("Origem da licença local desconhecida. Conecte-se à internet e clique em atualizar no Node.aec Connector.");
+                return Snapshot.Denied(GateReason.UnknownIssuer);
             }
 
             if (!string.Equals(payload.Scope, "master-lease", StringComparison.OrdinalIgnoreCase))
             {
-                return Snapshot.Failure("A licença local está em formato não suportado. Conecte-se à internet e clique em atualizar no Node.aec Connector.");
+                return Snapshot.Denied(GateReason.UnsupportedFormat);
             }
 
             // 0.1b Audience (RFC 7519): the issuer marks whom the token is intended for.
             // Missing or from another flow → does not validate at the plugin gate (fail-closed).
             if (!HasPlatformAudience(payload.Aud))
             {
-                return Snapshot.Failure("A licença local não foi emitida para este add-in. Conecte-se à internet e clique em atualizar no Node.aec Connector.");
+                return Snapshot.Denied(GateReason.WrongAudience);
             }
 
             // 0.2 Defense against a backdated clock: issuance in the future beyond the
             // 5-minute tolerance indicates a tampered date.
             if (payload.Iat > DateTimeOffset.UtcNow.ToUnixTimeSeconds() + ClockSkewToleranceSeconds)
             {
-                return Snapshot.Failure("A data da licença local é inválida. Confira a data e hora deste computador e tente novamente.");
+                return Snapshot.Denied(GateReason.ClockInvalid);
             }
 
             // 1. Hardware binding validation (machine ID). Without a readable MachineGuid
             //    there is no way to confirm the lease belongs to this machine: fail closed.
             if (!HardwareId.TryGetMachineId(out string currentMachineId, out _))
             {
-                return Snapshot.Failure("Não foi possível identificar esta máquina (MachineGuid do Windows indisponível). Contate o suporte Node.aec.");
+                return Snapshot.Denied(GateReason.MachineIdUnavailable);
             }
 
             if (!string.Equals(payload.Mid, currentMachineId, StringComparison.OrdinalIgnoreCase))
             {
-                return Snapshot.Failure("A concessão de licenças foi emitida para outra estação de trabalho (Hardware ID divergente).");
+                return Snapshot.Denied(GateReason.MachineMismatch);
             }
 
             // 2. Offline grace deadline validation. Without a plausible `exp`,
@@ -98,8 +107,8 @@ public static class Gate
             if (payload.IsExpired)
             {
                 return payload.ExpiresAt is { } exp
-                    ? Snapshot.Failure($"O prazo de tolerância offline expirou em {exp:dd/MM/yyyy}. Conecte-se à internet para sincronizar.")
-                    : Snapshot.Failure("O prazo da licença local não pôde ser lido. Conecte-se à internet e clique em atualizar no Node.aec Connector.");
+                    ? Snapshot.Denied(GateReason.OfflineGraceExpired, date: exp)
+                    : Snapshot.Denied(GateReason.LeaseExpiryUnreadable);
             }
 
             // 3. Validation of the specific product in the grant list
@@ -108,29 +117,29 @@ public static class Gate
 
             if (item == null)
             {
-                return Snapshot.Failure($"O produto '{productSlug}' não consta nas licenças ativas desta conta. Adquira ou ative no catálogo Node.aec.");
+                return Snapshot.Denied(GateReason.ProductNotFound, subject: productSlug);
             }
 
             if (!item.IsActive())
             {
                 if (string.Equals(item.Status, "seat_limit_reached", StringComparison.OrdinalIgnoreCase))
                 {
-                    return Snapshot.Failure($"O limite de computadores simultâneos para '{item.Name}' foi atingido.");
+                    return Snapshot.Denied(GateReason.SeatLimitReached, subject: item.Name);
                 }
 
                 if (item.ExpiresAt.HasValue && item.ExpiresAt.Value < DateTimeOffset.UtcNow)
                 {
-                    return Snapshot.Failure($"A licença ou período de teste de '{item.Name}' expirou em {item.ExpiresAt.Value:dd/MM/yyyy}.");
+                    return Snapshot.Denied(GateReason.LicenseExpired, subject: item.Name, date: item.ExpiresAt.Value);
                 }
 
-                return Snapshot.Failure($"A licença de '{item.Name}' está com status '{item.Status}'.");
+                return Snapshot.Denied(GateReason.LicenseInactive, subject: item.Name, status: item.Status);
             }
 
-            return Snapshot.Success(item.Type, item.LicenseKey, item.Name, item.ExpiresAt);
+            return Snapshot.Granted(item.Type, item.LicenseKey, item.Name, item.ExpiresAt);
         }
         catch
         {
-            return Snapshot.Failure("Não foi possível verificar a licença local. Abra o Node.aec Connector para ressincronizar.");
+            return Snapshot.Denied(GateReason.VerificationError);
         }
     }
 
@@ -195,27 +204,55 @@ public static class Gate
 }
 
 /// <summary>
-/// Immutable result of <see cref="Gate.Validate(string)"/>: only the
-/// <see cref="Success"/>/<see cref="Failure"/> factories build one and no property
-/// changes afterwards — a consumer cannot rewrite a gate result.
+/// Immutable result of <see cref="Gate.Validate(string)"/>: no property changes after it
+/// is built, so a consumer cannot rewrite a gate result.
 /// </summary>
 public sealed class Snapshot
 {
-    private Snapshot(bool isLicensed, string message, string? productName, string? licenseType, string? licenseKey, DateTimeOffset? expiresAt)
+    private readonly string? _customMessage;
+    private readonly string? _subject;
+    private readonly string? _status;
+    private readonly DateTimeOffset? _date;
+
+    private Snapshot(
+        bool isLicensed,
+        GateReason reason,
+        string? productName,
+        string? licenseType,
+        string? licenseKey,
+        DateTimeOffset? expiresAt,
+        string? customMessage = null,
+        string? subject = null,
+        string? status = null,
+        DateTimeOffset? date = null)
     {
         IsLicensed = isLicensed;
-        Message = message;
+        Reason = reason;
         ProductName = productName;
         LicenseType = licenseType;
         LicenseKey = licenseKey;
         ExpiresAt = expiresAt;
+        _customMessage = customMessage;
+        _subject = subject;
+        _status = status;
+        _date = date;
     }
 
     /// <summary>Single branch point: <c>true</c> only with an active, verified license.</summary>
     public bool IsLicensed { get; }
 
-    /// <summary>Verbatim PT-BR message (same taxonomy as the Connector); display it to the user.</summary>
-    public string Message { get; }
+    /// <summary>
+    /// The one specific reason for the decision; <see cref="GateReason.Licensed"/> on success.
+    /// Use it to log or to react to a specific case, never to decide whether to run: that is
+    /// <see cref="IsLicensed"/>.
+    /// </summary>
+    public GateReason Reason { get; }
+
+    /// <summary>
+    /// End-user text in Brazilian Portuguese, the same as <c>GetMessage(MessageLanguage.Portuguese)</c>.
+    /// It names the one specific reason and the next step: show it as-is.
+    /// </summary>
+    public string Message => GetMessage(MessageLanguage.Portuguese);
 
     /// <summary>Display name of the grant; <c>null</c> on failure.</summary>
     public string? ProductName { get; }
@@ -223,19 +260,51 @@ public sealed class Snapshot
     /// <summary>Grant type (e.g. <c>perpetual</c>); <c>null</c> on failure.</summary>
     public string? LicenseType { get; }
 
-    /// <summary>License key; <c>null</c> on failure.</summary>
+    /// <summary>
+    /// The user's license key (<c>NAEC-…</c>); <c>null</c> on failure. A secret of the end
+    /// user: never log it or send it anywhere.
+    /// </summary>
     public string? LicenseKey { get; }
 
     /// <summary>Grant expiry; <c>null</c> = no claim / perpetual.</summary>
     public DateTimeOffset? ExpiresAt { get; }
 
+    /// <summary>
+    /// End-user text for <see cref="Reason"/> in <paramref name="language"/>. Like
+    /// <see cref="Message"/>, it names the one specific reason and the next step.
+    /// </summary>
+    /// <param name="language">Language of the text.</param>
+    /// <returns>The message, never <c>null</c>.</returns>
+    public string GetMessage(MessageLanguage language) =>
+        _customMessage ?? GateMessages.Format(Reason, language, _subject, _status, _date);
+
+    /// <summary>Licensed result built by the gate.</summary>
+    internal static Snapshot Granted(string type, string? key, string? name, DateTimeOffset? expiresAt) =>
+        new Snapshot(true, GateReason.Licensed, name, type, key, expiresAt);
+
+    /// <summary>Denied result built by the gate; the arguments fill the message for <paramref name="reason"/>.</summary>
+    internal static Snapshot Denied(GateReason reason, string? subject = null, string? status = null, DateTimeOffset? date = null) =>
+        new Snapshot(false, reason, null, null, null, null, subject: subject, status: status, date: date);
+
+    /// <summary>
+    /// Builds a licensed result with a fixed message. Kept for compatibility with 0.1/0.2;
+    /// a plugin has no reason to call it, because <see cref="Gate.Validate(string)"/> builds every result.
+    /// </summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
     public static Snapshot Success(string type, string? key, string? name, DateTimeOffset? expiresAt, string message = "Licença ativa e verificada.")
     {
-        return new Snapshot(true, message, name, type, key, expiresAt);
+        // The default text stays translatable; only a caller-supplied text is fixed.
+        string? custom = message == "Licença ativa e verificada." ? null : message;
+        return new Snapshot(true, GateReason.Licensed, name, type, key, expiresAt, customMessage: custom);
     }
 
+    /// <summary>
+    /// Builds a denied result with a fixed message and <see cref="GateReason.VerificationError"/>.
+    /// Kept for compatibility with 0.1/0.2; a plugin has no reason to call it.
+    /// </summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
     public static Snapshot Failure(string message)
     {
-        return new Snapshot(false, message, null, null, null, null);
+        return new Snapshot(false, GateReason.VerificationError, null, null, null, null, customMessage: message);
     }
 }

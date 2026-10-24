@@ -161,6 +161,50 @@ public static class LeaseSignatureVerifier
     }
 
     /// <summary>
+    /// Whether <paramref name="rawKey"/> is one of the compiled anchors. Read-only: it lets
+    /// the Node.aec Connector notice a published key (JWKS) that this version does not trust
+    /// yet, which means a key rotation is under way and a newer package is needed.
+    /// </summary>
+    /// <param name="rawKey">Raw 32-byte Ed25519 public key (the JWK <c>x</c> value, decoded).</param>
+    /// <returns><c>true</c> when the key matches a compiled anchor.</returns>
+    public static bool IsTrustedKey(byte[]? rawKey)
+    {
+        if (rawKey == null || rawKey.Length != RawKeySize)
+        {
+            return false;
+        }
+
+        foreach (var anchor in LoadAnchorKeys())
+        {
+            if (KeysEqual(anchor, rawKey))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>Compares two raw keys byte by byte (no Span: net48 has no SequenceEqual on spans).</summary>
+    private static bool KeysEqual(byte[] left, byte[] right)
+    {
+        if (left.Length != right.Length)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < left.Length; i++)
+        {
+            if (left[i] != right[i])
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
     /// Decodes every usable anchor from <see cref="TrustedAnchors"/>.
     /// Invalid entries are skipped individually; when none decodes, the
     /// list comes back empty (fail-closed at the caller).
