@@ -4,6 +4,17 @@ Offline license gate for Node.aec Revit add-ins. This NuGet package evaluates a 
 
 All failure modes are fail-closed: a missing lease, an invalid signature, a machine mismatch, or an expired offline grace period yields `IsLicensed = false`, a `Reason` naming the case, and a message (Portuguese or English) intended to be displayed verbatim.
 
+## Guides
+
+| You are… | Read |
+|---|---|
+| Starting a new plugin | [Template](https://github.com/nodeaec/templates-revit#readme): `dotnet new nodeaec-revit-plugin` generates the integration |
+| Adding licensing to an existing plugin | [Partner Integration Guide](https://github.com/nodeaec/revit-connector/blob/main/docs/PARTNER_INTEGRATION.md) |
+| Learning from a working example | [Sample Plugin](https://github.com/nodeaec/revit-sample-plugin#readme) |
+| A coding agent doing any of these | [`licensing-integrate` skill](https://github.com/nodeaec/revit-sample-plugin/tree/main/.agents/skills/licensing-integrate) |
+
+This README is the package reference: API, reasons and messages, and how verification works.
+
 ## Installation
 
 Install the NuGet package once per add-in project:
